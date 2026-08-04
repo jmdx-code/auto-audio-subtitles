@@ -1,0 +1,13 @@
+:root {
+  color: #202635;
+  background: #f6f7fb;
+  font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+body { width: 280px; margin: 0; }
+.launcher-card { display: grid; justify-items: center; gap: 10px; padding: 24px 20px 20px; text-align: center; }
+.launcher-icon { display: grid; width: 42px; height: 42px; place-items: center; color: #fff; border-radius: 12px; background: linear-gradient(135deg, #4f5bd5, #7b72e9); font-size: 22px; }
+.launcher-card strong { font-size: 15px; }
+.launcher-card p { min-height: 32px; margin: 0; color: #70798a; font-size: 12px; line-height: 1.45; }
+.launcher-card button { width: 100%; padding: 9px 14px; color: #fff; border: 0; border-radius: 8px; background: #4f5bd5; cursor: pointer; font-weight: 650; }
+.launcher-card button:disabled { opacity: .55; cursor: wait; }

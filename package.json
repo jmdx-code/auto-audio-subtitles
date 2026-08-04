@@ -1,0 +1,37 @@
+{
+  "name": "auto-audio-subtitles",
+  "private": true,
+  "version": "0.1.5",
+  "type": "module",
+  "description": "在 Microsoft Edge 中批量生成音频与连续 SRT 字幕。",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "postinstall": "node scripts/patch-univer-myanmar.mjs",
+    "dev": "node scripts/patch-univer-myanmar.mjs && vite",
+    "build": "node scripts/patch-univer-myanmar.mjs && npm run typecheck && vite build && node scripts/prune-dist.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@ffmpeg/core": "0.12.10",
+    "@ffmpeg/ffmpeg": "0.12.15",
+    "@fontsource/noto-sans-myanmar": "^5.3.0",
+    "@univerjs/preset-sheets-core": "^0.25.1",
+    "@univerjs/presets": "^0.25.1",
+    "@webextkits/storage-local": "1.0.0",
+    "edge-tts-universal": "1.4.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.1",
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.1",
+    "vitest": "^3.2.4"
+  }
+}

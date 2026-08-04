@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify extension layout
+        run: test -f dist/manifest.json && test -f dist/vendor/ffmpeg-core.wasm && test -f dist/LICENSE && test -f dist/THIRD_PARTY_NOTICES.md && test -f dist/licenses/FFMPEG-GPL-2.0-OR-LATER.txt && test -f dist/licenses/EDGE-TTS-UNIVERSAL-AGPL-3.0.txt
