@@ -1,7 +1,7 @@
 {
   "name": "auto-audio-subtitles",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "description": "在 Microsoft Edge 中批量生成音频与连续 SRT 字幕。",
   "license": "AGPL-3.0-only",

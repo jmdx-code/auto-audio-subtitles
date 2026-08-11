@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "自动音频字幕",
   "description": "使用 Edge TTS 批量生成音频并创建连续时间轴 SRT 字幕。",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "minimum_chrome_version": "120",
   "action": {
     "default_title": "打开自动音频字幕",
