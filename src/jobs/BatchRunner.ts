@@ -19,6 +19,7 @@ import type {
 import { TaskCancelledError, TaskController } from "./TaskController";
 
 type RowPatch = Partial<Pick<ProjectRow, "status" | "progress" | "detail" | "error">>;
+const FFMPEG_RECYCLE_INTERVAL = 12;
 
 export type BatchRunnerEvents = {
   updateRow(rowId: string, patch: RowPatch): void;
@@ -45,7 +46,6 @@ export class BatchRunner {
     const completed: string[] = [];
     const failed: string[] = [];
 
-    await this.audio.ensureLoaded();
     for (const job of jobs) {
       try {
         await this.controller.checkpoint();
@@ -113,8 +113,18 @@ export class BatchRunner {
           tempFileName,
           duration: readWavDuration(wav),
         });
+        if (
+          (index + 1) % FFMPEG_RECYCLE_INTERVAL === 0
+          && index + 1 < lines.length
+        ) {
+          this.events.log(`已处理 ${index + 1} 个片段，正在释放浏览器音频内存。`);
+          this.audio.recycle();
+        }
       }
 
+      // Trimming allocates decoder/filter buffers that WebAssembly does not
+      // always return to the browser. Start concatenation with a fresh heap.
+      this.audio.recycle();
       const groups = groupSegments(segments, this.settings.maxSegmentSeconds);
       const outputs: GeneratedFile[] = [];
       for (let index = 0; index < groups.length; index += 1) {
@@ -123,19 +133,17 @@ export class BatchRunner {
           progress: 72 + Math.round((index / groups.length) * 20),
           detail: `正在合并音频 ${index + 1}/${groups.length}`,
         });
-        const wavFiles = await Promise.all(
-          groups[index].map((segment) =>
-            readTempFile(job.rowId, segment.tempFileName),
-          ),
-        );
         const mp3 = await this.audio.encodeMp3(
-          wavFiles,
+          groups[index].map(
+            (segment) => () => readTempFile(job.rowId, segment.tempFileName),
+          ),
           `${job.rowId}-group-${index}`,
         );
         outputs.push({
           name: `${String(index + 1).padStart(2, "0")}.mp3`,
           data: mp3,
         });
+        this.audio.recycle();
       }
 
       outputs.push({
@@ -149,6 +157,7 @@ export class BatchRunner {
       });
       await writeProjectOutput(this.outputRoot, job.folderName, outputs);
     } finally {
+      this.audio.recycle();
       await removeTempJob(job.rowId).catch(() => undefined);
     }
   }
