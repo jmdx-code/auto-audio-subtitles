@@ -24,12 +24,13 @@ import { parseClipboardColumn } from "@/utils/clipboard";
 
 const HEADER_ROW = 0;
 const FIRST_DATA_ROW = 1;
-const TEXT_COLUMN = 0;
-const NAME_COLUMN = 1;
-const FRAGMENT_COLUMN = 2;
-const STATUS_COLUMN = 3;
+const RAW_COLUMN = 0;
+const TEXT_COLUMN = 1;
+const NAME_COLUMN = 2;
+const FRAGMENT_COLUMN = 3;
+const STATUS_COLUMN = 4;
 const INITIAL_ROW_COUNT = 20;
-const DATA_COLUMN_COUNT = 4;
+const DATA_COLUMN_COUNT = 5;
 const CONTENT_FONT_FAMILY = "Noto Sans Myanmar";
 const BLOCKED_STRUCTURE_COMMANDS = new Set([
   "sheet.command.insert-row",
@@ -44,7 +45,7 @@ const BLOCKED_STRUCTURE_COMMANDS = new Set([
   "sheet.command.delete-range-move-left",
 ]);
 
-type FocusColumn = "text" | "name";
+type FocusColumn = "raw" | "text" | "name";
 
 export type ProjectSpreadsheetHandle = {
   replaceRows(rows: ProjectRow[]): void;
@@ -142,12 +143,13 @@ export const ProjectSpreadsheet = forwardRef<
     internalWriteRef.current = true;
     try {
       worksheet
-        .getRange(FIRST_DATA_ROW, TEXT_COLUMN, clearCount, DATA_COLUMN_COUNT)
+        .getRange(FIRST_DATA_ROW, RAW_COLUMN, clearCount, DATA_COLUMN_COUNT)
         .clearContent();
       worksheet
-        .getRange(FIRST_DATA_ROW, TEXT_COLUMN, normalized.length, DATA_COLUMN_COUNT)
+        .getRange(FIRST_DATA_ROW, RAW_COLUMN, normalized.length, DATA_COLUMN_COUNT)
         .setValues(
           normalized.map((row) => [
+            row.rawText ?? "",
             row.text,
             row.name,
             fragmentCount(row.text),
@@ -155,7 +157,7 @@ export const ProjectSpreadsheet = forwardRef<
           ]),
         );
       worksheet
-        .getRange(FIRST_DATA_ROW, TEXT_COLUMN, normalized.length, 2)
+        .getRange(FIRST_DATA_ROW, RAW_COLUMN, normalized.length, 3)
         .setWrap(true)
         .setVerticalAlignment("top");
     } finally {
@@ -179,12 +181,12 @@ export const ProjectSpreadsheet = forwardRef<
       maxDataRows,
     );
     const values = worksheet
-      .getRange(FIRST_DATA_ROW, TEXT_COLUMN, scanCount, DATA_COLUMN_COUNT)
+      .getRange(FIRST_DATA_ROW, RAW_COLUMN, scanCount, DATA_COLUMN_COUNT)
       .getValues();
     let lastUsed = Math.max(0, boundedRequiredRow - FIRST_DATA_ROW);
     for (let index = values.length - 1; index >= 0; index -= 1) {
-      const [text, name] = values[index] ?? [];
-      if (cellString(text) || cellString(name)) {
+      const [raw, text, name] = values[index] ?? [];
+      if (cellString(raw) || cellString(text) || cellString(name)) {
         lastUsed = Math.max(lastUsed, index);
         break;
       }
@@ -193,13 +195,16 @@ export const ProjectSpreadsheet = forwardRef<
     const nextRows: ProjectRow[] = [];
 
     for (let index = 0; index <= lastUsed; index += 1) {
-      const [textValue, nameValue] = values[index] ?? [];
+      const [rawValue, textValue, nameValue] = values[index] ?? [];
+      const rawText = cellString(rawValue);
       const text = cellString(textValue);
       const name = cellString(nameValue);
       const previous = rowsRef.current[index];
       const unchanged = previous?.text === text && previous.name === name;
       nextRows.push({
         ...(previous ?? createBlankProjectRow()),
+        rawText,
+        organizeDetail: (previous?.rawText ?? "") === rawText ? previous?.organizeDetail : undefined,
         text,
         name,
         status: unchanged ? previous.status : "idle",
@@ -231,7 +236,7 @@ export const ProjectSpreadsheet = forwardRef<
   }
 
   function isEditableCell(row: number, column: number): boolean {
-    return row >= FIRST_DATA_ROW && column >= TEXT_COLUMN && column < FRAGMENT_COLUMN;
+    return row >= FIRST_DATA_ROW && column >= RAW_COLUMN && column < FRAGMENT_COLUMN;
   }
 
   function measureEditorRect(row: number, column: number): CellEditorRect | null {
@@ -357,7 +362,7 @@ export const ProjectSpreadsheet = forwardRef<
       finishCellEditor(true);
       replaceRows(nextRows);
     },
-    focusRow(rowId, column = "text") {
+    focusRow(rowId, column = "raw") {
       finishCellEditor(true);
       const worksheet = runtimeRef.current?.worksheet;
       if (!worksheet) return;
@@ -366,13 +371,13 @@ export const ProjectSpreadsheet = forwardRef<
       worksheet
         .getRange(
           FIRST_DATA_ROW + rowIndex,
-          column === "name" ? NAME_COLUMN : TEXT_COLUMN,
+          column === "name" ? NAME_COLUMN : column === "raw" ? RAW_COLUMN : TEXT_COLUMN,
         )
         .activate();
     },
     clearSelection() {
       finishCellEditor(true);
-      runtimeRef.current?.worksheet.getRange(FIRST_DATA_ROW, TEXT_COLUMN).activate();
+      runtimeRef.current?.worksheet.getRange(FIRST_DATA_ROW, RAW_COLUMN).activate();
       onSelectionChangeRef.current(new Set());
     },
     readRows() {
@@ -410,15 +415,16 @@ export const ProjectSpreadsheet = forwardRef<
     worksheet.setRowCount(INITIAL_ROW_COUNT);
     worksheet.setColumnCount(DATA_COLUMN_COUNT);
     worksheet.setFrozenRows(1);
-    worksheet.setColumnWidth(TEXT_COLUMN, 620);
-    worksheet.setColumnWidth(NAME_COLUMN, 220);
-    worksheet.setColumnWidth(FRAGMENT_COLUMN, 110);
-    worksheet.setColumnWidth(STATUS_COLUMN, 260);
+    worksheet.setColumnWidth(RAW_COLUMN, 380);
+    worksheet.setColumnWidth(TEXT_COLUMN, 440);
+    worksheet.setColumnWidth(NAME_COLUMN, 160);
+    worksheet.setColumnWidth(FRAGMENT_COLUMN, 70);
+    worksheet.setColumnWidth(STATUS_COLUMN, 240);
     worksheet.setRowHeight(HEADER_ROW, 34);
     worksheet.setRowHeights(FIRST_DATA_ROW, INITIAL_ROW_COUNT - 1, 64);
     worksheet
-      .getRange(HEADER_ROW, TEXT_COLUMN, 1, DATA_COLUMN_COUNT)
-      .setValues([["文案内容（单元格内每行 = 一条字幕）", "项目名称", "片段", "状态"]])
+      .getRange(HEADER_ROW, RAW_COLUMN, 1, DATA_COLUMN_COUNT)
+      .setValues([["原始缅文（待 AI 整理）", "整理后文案（每行 = 一条字幕）", "项目名称", "片段", "状态"]])
       .setFontWeight("bold")
       .setFontColor("#343a46")
       .setBackgroundColor("#f3f5f8")
@@ -427,7 +433,7 @@ export const ProjectSpreadsheet = forwardRef<
       .getRange(HEADER_ROW, FRAGMENT_COLUMN, 1, 2)
       .setHorizontalAlignment("center");
     worksheet
-      .getRange(FIRST_DATA_ROW, TEXT_COLUMN, INITIAL_ROW_COUNT - 1, 2)
+      .getRange(FIRST_DATA_ROW, RAW_COLUMN, INITIAL_ROW_COUNT - 1, 3)
       .setWrap(true)
       .setFontFamily(CONTENT_FONT_FAMILY)
       .setVerticalAlignment("top");
@@ -614,7 +620,7 @@ export const ProjectSpreadsheet = forwardRef<
     host.addEventListener("paste", captureColumnPaste, true);
 
     replaceRows(rowsRef.current);
-    worksheet.getRange(FIRST_DATA_ROW, TEXT_COLUMN).activate();
+    worksheet.getRange(FIRST_DATA_ROW, RAW_COLUMN).activate();
     setReady(true);
 
     return () => {
@@ -657,7 +663,7 @@ export const ProjectSpreadsheet = forwardRef<
           ref={editorTextareaRef}
           data-testid="sheet-cell-editor"
           className="sheet-cell-editor"
-          aria-label={`编辑第 ${cellEditor.row + 1} 行${cellEditor.column === TEXT_COLUMN ? "文案" : "项目名称"}`}
+          aria-label={`编辑第 ${cellEditor.row + 1} 行${cellEditor.column === RAW_COLUMN ? "原始缅文" : cellEditor.column === TEXT_COLUMN ? "整理后文案" : "项目名称"}`}
           value={cellEditor.value}
           spellCheck={false}
           style={{
@@ -688,9 +694,9 @@ export const ProjectSpreadsheet = forwardRef<
             let nextRow = cellEditor.row;
             let nextColumn = cellEditor.column + direction;
             if (nextColumn >= FRAGMENT_COLUMN) {
-              nextColumn = TEXT_COLUMN;
+              nextColumn = RAW_COLUMN;
               nextRow += 1;
-            } else if (nextColumn < TEXT_COLUMN) {
+            } else if (nextColumn < RAW_COLUMN) {
               nextColumn = NAME_COLUMN;
               nextRow -= 1;
             }
@@ -728,6 +734,7 @@ function statusLabel(row: ProjectRow): string {
     completed: "已完成",
     failed: "失败",
   };
+  if (row.organizeDetail && (row.status === "idle" || /^(AI 整理中|整理失败|整理已停止)/.test(row.organizeDetail))) return row.organizeDetail;
   const detail = row.error || row.detail;
   return detail ? `${labels[row.status]} · ${detail}` : labels[row.status];
 }
@@ -743,7 +750,7 @@ function ensureSheetRowCapacity(
   worksheet.setRowCount(requiredRowCount);
   worksheet.setRowHeights(currentRowCount, addedRowCount, 64);
   worksheet
-    .getRange(currentRowCount, TEXT_COLUMN, addedRowCount, 2)
+    .getRange(currentRowCount, RAW_COLUMN, addedRowCount, 3)
     .setWrap(true)
     .setFontFamily(CONTENT_FONT_FAMILY)
     .setVerticalAlignment("top");
@@ -757,12 +764,13 @@ function ensureSheetRowCapacity(
 }
 
 function dataSignature(rows: ProjectRow[]): string {
-  return rows.map((row) => `${row.id}\u0000${row.text}\u0000${row.name}`).join("\u0001");
+  return rows.map((row) => `${row.id}\u0000${row.rawText ?? ""}\u0000${row.text}\u0000${row.name}`).join("\u0001");
 }
 
 function createBlankProjectRow(id: string = crypto.randomUUID()): ProjectRow {
   return {
     id,
+    rawText: "",
     text: "",
     name: "",
     status: "idle",

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "自动音频字幕",
-  "description": "使用 Edge TTS 批量生成音频并创建连续时间轴 SRT 字幕。",
-  "version": "0.1.6",
+  "description": "使用 AI Studio 整理缅文，通过 Edge TTS 批量生成音频与连续 SRT 字幕。",
+  "version": "0.2.0",
   "minimum_chrome_version": "120",
   "action": {
     "default_title": "打开自动音频字幕",
@@ -18,8 +18,26 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage", "tabs"],
-  "host_permissions": ["https://speech.platform.bing.com/*"],
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://speech.platform.bing.com/*",
+    "https://aistudio.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://aistudio.google.com/*"
+      ],
+      "js": [
+        "assets/studio.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'"
   }

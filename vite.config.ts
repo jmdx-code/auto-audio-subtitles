@@ -65,6 +65,7 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       input: {
+        studio: resolve(__dirname, "src/organizer/studioContent.ts"),
         workbench: resolve(__dirname, "workbench.html"),
         launcher: resolve(__dirname, "launcher.html"),
       },

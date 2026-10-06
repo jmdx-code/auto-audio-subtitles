@@ -100,7 +100,9 @@ function decodeHtmlEntities(value: string): string {
       if (entity[0] !== "#") return named[entity.toLowerCase()] ?? match;
       const hexadecimal = entity[1]?.toLowerCase() === "x";
       const codePoint = Number.parseInt(entity.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10);
-      return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : match;
+      return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
+        && !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+        ? String.fromCodePoint(codePoint) : match;
     },
   );
 }

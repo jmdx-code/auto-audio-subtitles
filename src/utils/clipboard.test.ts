@@ -36,6 +36,10 @@ describe("grid clipboard serialization", () => {
 });
 
 describe("single-column spreadsheet detection", () => {
+  it("preserves invalid numeric entities without throwing on untrusted clipboard HTML", () => {
+    expect(parseClipboardColumn("", "<table><tr><td>&#1114112; &#xD800; &#x1F600;</td></tr></table>"))
+      .toEqual(["&#1114112; &#xD800; 😀"]);
+  });
   it("keeps quoted internal newlines in one cell", () => {
     expect(parseClipboardColumn('"第一段\r\n\r\n第二段\r\n第三段"')).toEqual([
       "第一段\n\n第二段\n第三段",

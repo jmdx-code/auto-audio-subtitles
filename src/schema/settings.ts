@@ -7,6 +7,9 @@ import {
 import type { AppSettings } from "@/types";
 
 export const defaultSettings: AppSettings = {
+  studioModelId: "",
+  studioIntervalSeconds: 5,
+  studioTimeoutSeconds: 180,
   selectedVoice: DEFAULT_VOICE,
   rate: 0,
   pitch: 0,
@@ -20,6 +23,9 @@ export const defaultSettings: AppSettings = {
 export const settingsSchema: JSONSchemaType<AppSettings> = {
   type: "object",
   properties: {
+    studioModelId: { type: "string", default: "" },
+    studioIntervalSeconds: { type: "number", default: 5 },
+    studioTimeoutSeconds: { type: "number", default: 180 },
     selectedVoice: { type: "string", default: DEFAULT_VOICE },
     rate: { type: "number", default: 0 },
     pitch: { type: "number", default: 0 },
@@ -43,6 +49,9 @@ export const settingsSchema: JSONSchemaType<AppSettings> = {
     voiceCacheUpdatedAt: { type: "number", default: 0 },
   },
   required: [
+    "studioModelId",
+    "studioIntervalSeconds",
+    "studioTimeoutSeconds",
     "selectedVoice",
     "rate",
     "pitch",

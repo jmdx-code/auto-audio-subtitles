@@ -52,6 +52,9 @@ import { loadSettings, saveSettings } from "@/storage/settings";
 import { cleanupAllTempJobs } from "@/storage/tempStore";
 import type { AppSettings, ProjectRow, VoiceInfo } from "@/types";
 import { buildJobs } from "@/utils/naming";
+import { buildOrganizerPrompt, cleanOrganizerResult } from "@/organizer/prompt";
+import { discoverStudioModels, openStudio, organizeInStudio, listStudioTabs, selectStudioTab, getSelectedStudioTabId, type StudioTabOption } from "@/organizer/studioClient";
+import type { StudioModelOption } from "@/organizer/types";
 
 type Toast = { id: number; kind: "success" | "error" | "info"; message: string };
 type Confirmation = {
@@ -77,6 +80,15 @@ export function App() {
   const [localeFilter, setLocaleFilter] = useState("all");
   const [previewing, setPreviewing] = useState(false);
   const [running, setRunning] = useState(false);
+  const [organizing, setOrganizing] = useState(false);
+  const [studioConnecting, setStudioConnecting] = useState(false);
+  const [studioModels, setStudioModels] = useState<StudioModelOption[]>([]);
+  const [studioTabs, setStudioTabs] = useState<StudioTabOption[]>([]);
+  const [selectedStudioId, setSelectedStudioId] = useState<number | undefined>(getSelectedStudioTabId);
+  const [connectedStudioId, setConnectedStudioId] = useState<number | undefined>();
+  const [organizerProgress, setOrganizerProgress] = useState("");
+  const organizeStopRef = useRef(false);
+  const busy = running || organizing || studioConnecting;
   const [paused, setPaused] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
@@ -125,14 +137,14 @@ export function App() {
   }, [settings, settingsReady]);
 
   useEffect(() => {
-    if (!running) return;
+    if (!busy) return;
     const preventClose = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", preventClose);
     return () => window.removeEventListener("beforeunload", preventClose);
-  }, [running]);
+  }, [busy]);
 
   useEffect(() => {
     const availableIds = new Set(rows.map((row) => row.id));
@@ -185,7 +197,7 @@ export function App() {
     setRows(nextRows);
   }
 
-  function focusGridRow(rowId: string, colKey: "text" | "name" = "text"): void {
+  function focusGridRow(rowId: string, colKey: "raw" | "text" | "name" = "raw"): void {
     window.requestAnimationFrame(() => {
       spreadsheetRef.current?.focusRow(rowId, colKey);
     });
@@ -219,6 +231,7 @@ export function App() {
     if (!source) return;
     const row: ProjectRow = {
       ...createBlankRow(),
+      rawText: source.rawText,
       text: source.text,
       name: source.name,
     };
@@ -330,7 +343,7 @@ export function App() {
   }
 
   async function runBatch(mode: "all" | "failed"): Promise<void> {
-    if (running) return;
+    if (busy) return;
     const currentRows = spreadsheetRef.current?.readRows() ?? rows;
     setRows(currentRows);
     const validated = validateSettings(settings);
@@ -432,6 +445,110 @@ export function App() {
     }
   }
 
+  async function refreshStudioTabs(): Promise<number | undefined> {
+    const tabs = await listStudioTabs();
+    setStudioTabs(tabs);
+    const currentId = getSelectedStudioTabId();
+    const id = tabs.some((tab) => tab.id === currentId) ? currentId : tabs.length === 1 ? tabs[0].id : undefined;
+    selectStudioTab(id);
+    setSelectedStudioId(id);
+    if (id !== connectedStudioId) { setStudioModels([]); setConnectedStudioId(undefined); }
+    return id;
+  }
+
+  async function openStudioPage(): Promise<void> {
+    try {
+      await openStudio();
+      await refreshStudioTabs();
+    } catch (error) { showToast("error", errorMessage(error)); }
+  }
+
+  async function connectStudio(): Promise<void> {
+    if (busy) return;
+    setStudioConnecting(true);
+    try {
+      const id = await refreshStudioTabs();
+      if (id === undefined) throw new Error("请先打开 AI Studio；若有多个页面，请在标签页列表中明确选择一个。");
+      const result = await discoverStudioModels(id);
+      const models = result.models.filter((model) => !model.paid);
+      setStudioModels(models);
+      if (!models.length) throw new Error("没有找到免费文本模型，请检查 AI Studio 登录和模型列表。");
+      const chosen = models.find((model) => model.id === settings.studioModelId)
+        ?? models.find((model) => model.id === result.currentModelId) ?? models[0];
+      updateSettings("studioModelId", chosen.id);
+      setConnectedStudioId(id);
+      showToast("success", `AI Studio #${id} 已连接，找到 ${models.length} 个免费文本模型。`);
+    } catch (error) {
+      setStudioModels([]);
+      setConnectedStudioId(undefined);
+      showToast("error", errorMessage(error));
+    } finally {
+      setStudioConnecting(false);
+    }
+  }
+
+  async function organizeRows(selectedOnly: boolean): Promise<void> {
+    if (busy) return;
+    if (selectedStudioId === undefined || connectedStudioId !== selectedStudioId || !studioModels.some((model) => model.id === settings.studioModelId)) {
+      showToast("error", "请先打开并登录 AI Studio，再连接免费模型。");
+      return;
+    }
+    const interval = settings.studioIntervalSeconds;
+    const timeout = settings.studioTimeoutSeconds;
+    if (!Number.isFinite(interval) || interval < 0 || interval > 300 ||
+        !Number.isFinite(timeout) || timeout < 30 || timeout > 600) {
+      showToast("error", "请求间隔须为 0–300 秒，回复超时须为 30–600 秒。");
+      return;
+    }
+    let current = spreadsheetRef.current?.readRows() ?? rows;
+    const targets = current.filter((row) => row.rawText?.trim() && (!selectedOnly || selectedRowIds.has(row.id)));
+    if (!targets.length) { showToast("info", "请先在原始缅文列填入文案。"); return; }
+    organizeStopRef.current = false;
+    const batchTabId = selectedStudioId;
+    setOrganizing(true);
+    let completed = 0;
+    const apply = (id: string, patch: Partial<ProjectRow>) => {
+      current = current.map((row) => row.id === id ? { ...row, ...patch } : row);
+      replaceGridRows(current);
+    };
+    try {
+      for (let index = 0; index < targets.length; index += 1) {
+        if (organizeStopRef.current) break;
+        if (index > 0) {
+          const deadline = Date.now() + interval * 1000;
+          while (Date.now() < deadline && !organizeStopRef.current) {
+            setOrganizerProgress(`请求间隔 · ${Math.ceil((deadline - Date.now()) / 1000)} 秒`);
+            await new Promise((resolve) => window.setTimeout(resolve, 200));
+          }
+        }
+        if (organizeStopRef.current) break;
+        const row = targets[index];
+        setOrganizerProgress(`正在整理 ${index + 1}/${targets.length}`);
+        apply(row.id, { organizeDetail: "AI 整理中…" });
+        try {
+          const result = cleanOrganizerResult(await organizeInStudio(
+            buildOrganizerPrompt(row.rawText!), settings.studioModelId, timeout, batchTabId,
+          ));
+          // 停止请求后丢弃尚未完成的结果，保留原文及此前的结果。
+          if (organizeStopRef.current) { apply(row.id, { organizeDetail: "整理已停止" }); break; }
+          apply(row.id, { text: result, status: "idle", progress: 0, detail: "", error: undefined, organizeDetail: "整理完成 · 可生成音频" });
+          completed += 1;
+        } catch (error) {
+          const message = errorMessage(error);
+          apply(row.id, { organizeDetail: `整理失败 · ${message}` });
+          appendLog(`第 ${index + 1} 项整理失败：${message}`);
+          // 网页失联、限流、超时等需处理后再发起，避免持续提交。
+          showToast("error", `整理已停止：${message}（已完成 ${completed} 项）`);
+          return;
+        }
+      }
+      showToast("info", `${organizeStopRef.current ? "整理已停止" : "整理完成"}，已写入 ${completed} 项。`);
+    } finally {
+      setOrganizing(false);
+      setOrganizerProgress("");
+    }
+  }
+
   function pauseBatch(): void {
     controllerRef.current?.pause();
     setPaused(true);
@@ -528,7 +645,11 @@ export function App() {
     );
   }
 
-  const workStatus = cancelling
+  const workStatus = organizing
+    ? organizerProgress || "正在整理文案"
+    : studioConnecting
+      ? "正在连接 AI Studio"
+      : cancelling
     ? "正在安全取消"
     : paused
       ? "任务已暂停"
@@ -543,7 +664,7 @@ export function App() {
       <header className="workspace-header">
         <div className="workspace-brand">
           <span className="brand-mark"><WandSparkles size={20} /></span>
-          <div><h1>自动音频字幕</h1><p>Edge TTS 工作台</p></div>
+          <div><h1>自动音频字幕</h1><p>缅文整理 · Edge TTS 工作台</p></div>
         </div>
 
         <div className="context-strip">
@@ -551,7 +672,7 @@ export function App() {
             <Volume2 size={16} />
             <span><small>当前音色</small><strong>{(selectedVoice?.friendlyName ?? settings.selectedVoice) || "未选择"}</strong></span>
           </button>
-          <button className="context-item" onClick={() => void chooseDirectory()} disabled={running} title="选择输出目录">
+          <button className="context-item" onClick={() => void chooseDirectory()} disabled={busy} title="选择输出目录">
             <FolderOpen size={16} />
             <span><small>输出目录</small><strong>{directory?.name ?? "尚未选择"}</strong></span>
             <i className={`permission-dot ${directory && directoryAuthorized ? "ready" : ""}`} />
@@ -570,7 +691,7 @@ export function App() {
           <button className={`toolbar-button ${settingsOpen ? "active" : ""}`} onClick={() => setSettingsOpen((open) => !open)}>
             <Settings2 size={17} /> 设置
           </button>
-          <button className="generate-button" onClick={() => void runBatch("all")} disabled={running || validCount === 0}>
+          <button className="generate-button" onClick={() => void runBatch("all")} disabled={busy || validCount === 0}>
             {running ? <LoaderCircle className="spin" size={17} /> : <Play size={17} fill="currentColor" />}
             {running ? "生成中" : "生成音频"}
           </button>
@@ -586,19 +707,41 @@ export function App() {
             </div>
             <div className="grid-actions">
               {selectedCount > 0 && <span className="selection-summary">已选 {selectedCount}</span>}
-              <button onClick={addRowAtEnd} disabled={running}><Plus size={15} /> 添加</button>
-              <button onClick={insertRowAfterSelection} disabled={running || selectedCount !== 1}><Plus size={15} /> 下方插入</button>
-              <button onClick={duplicateSelectedRow} disabled={running || selectedCount !== 1}><Copy size={15} /> 复制项目</button>
+              <button onClick={addRowAtEnd} disabled={busy}><Plus size={15} /> 添加</button>
+              <button onClick={insertRowAfterSelection} disabled={busy || selectedCount !== 1}><Plus size={15} /> 下方插入</button>
+              <button onClick={duplicateSelectedRow} disabled={busy || selectedCount !== 1}><Copy size={15} /> 复制项目</button>
               <span className="toolbar-separator" />
-              <button className="danger" onClick={() => void deleteSelectedRows()} disabled={running || selectedCount === 0}><Trash2 size={15} /> 删除</button>
-              <button onClick={() => void clearRows()} disabled={running}><X size={15} /> 清空</button>
+              <button className="danger" onClick={() => void deleteSelectedRows()} disabled={busy || selectedCount === 0}><Trash2 size={15} /> 删除</button>
+              <button onClick={() => void clearRows()} disabled={busy}><X size={15} /> 清空</button>
             </div>
+          </div>
+
+          <div className="organizer-commandbar">
+            <span className="organizer-label"><Sparkles size={16} /> 批量整理文案</span>
+            <button className="toolbar-button" disabled={busy} onClick={() => void openStudioPage()}>打开 AI Studio / 登录</button>
+            <button className="toolbar-button" disabled={busy} onClick={() => void refreshStudioTabs().catch((error) => showToast("error", errorMessage(error)))}>刷新标签页</button>
+            <select aria-label="AI Studio 标签页" value={selectedStudioId ?? ""} disabled={busy} onChange={(event) => {
+              const id = event.target.value ? Number(event.target.value) : undefined;
+              selectStudioTab(id); setSelectedStudioId(id); setStudioModels([]); setConnectedStudioId(undefined);
+            }}>
+              <option value="">请选择 AI Studio 标签页</option>
+              {studioTabs.map((tab) => <option key={tab.id} value={tab.id}>#{tab.id} · {tab.title}</option>)}
+            </select>
+            <button className="toolbar-button" disabled={busy} onClick={() => void connectStudio()}>{studioConnecting ? "连接中…" : "连接 / 刷新模型"}</button>
+            <select aria-label="AI Studio 免费文本模型" value={settings.studioModelId} disabled={busy || !studioModels.length} onChange={(event) => updateSettings("studioModelId", event.target.value)}>
+              {!studioModels.length && <option value={settings.studioModelId}>请先连接免费模型</option>}
+              {studioModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+            </select>
+            <button className="primary-button" disabled={busy || !studioModels.length} onClick={() => void organizeRows(false)}>整理全部</button>
+            <button className="toolbar-button" disabled={busy || !studioModels.length || !selectedCount} onClick={() => void organizeRows(true)}>整理所选</button>
+            {organizing && <button className="toolbar-button" onClick={() => { organizeStopRef.current = true; setOrganizerProgress("正在停止 · 等待当前 AI 回复结束"); }}>停止整理</button>}
+            <span className="organizer-hint">A 原文 → B 整理结果 → 生成音频</span>
           </div>
 
           <ProjectSpreadsheet
             ref={spreadsheetRef}
             rows={rows}
-            running={running}
+            running={busy}
             onRowsChange={setRows}
             onSelectionChange={setSelectedRowIds}
           />
@@ -612,20 +755,26 @@ export function App() {
             </div>
             <div className="drawer-scroll">
               <section className="settings-section">
+                <SectionHeading icon={<Sparkles />} title="AI 文案整理" subtitle="免费文本模型 · 每条新建临时会话" />
+                <label className="field"><span>请求间隔（秒）</span><input type="number" min={0} max={300} value={settings.studioIntervalSeconds} disabled={busy} onChange={(event) => updateSettings("studioIntervalSeconds", Number(event.target.value))} /></label>
+                <label className="field"><span>回复超时（秒）</span><input type="number" min={30} max={600} value={settings.studioTimeoutSeconds} disabled={busy} onChange={(event) => updateSettings("studioTimeoutSeconds", Number(event.target.value))} /></label>
+                <p className="section-note">每行约 20–70 字符，优先按标点和语义断行，去空行、末尾标签和表情。整理全部/所选会替换对应的 B 列，请检查结果后生成音频。停止会等待当前回复结束。</p>
+              </section>
+              <section className="settings-section">
                 <SectionHeading icon={<Volume2 />} title="声音" subtitle="统一应用到全部项目" />
                 <div className="drawer-field-row voice-search-row">
                   <label className="field grow">
                     <span>搜索音色</span>
-                    <input value={voiceSearch} onChange={(event) => setVoiceSearch(event.target.value)} placeholder="名称或 ShortName" disabled={running} />
+                    <input value={voiceSearch} onChange={(event) => setVoiceSearch(event.target.value)} placeholder="名称或 ShortName" disabled={busy} />
                   </label>
-                  <button className="square-button field-button" onClick={() => void refreshVoices()} disabled={voiceLoading || running} title="刷新音色">
+                  <button className="square-button field-button" onClick={() => void refreshVoices()} disabled={voiceLoading || busy} title="刷新音色">
                     <RefreshCw className={voiceLoading ? "spin" : ""} size={16} />
                   </button>
                 </div>
                 <label className="field">
                   <span>地区</span>
                   <div className="select-wrap">
-                    <select value={localeFilter} onChange={(event) => setLocaleFilter(event.target.value)} disabled={running}>
+                    <select value={localeFilter} onChange={(event) => setLocaleFilter(event.target.value)} disabled={busy}>
                       <option value="all">全部地区</option>
                       {locales.map((locale) => <option key={locale}>{locale}</option>)}
                     </select>
@@ -635,7 +784,7 @@ export function App() {
                 <label className="field">
                   <span>当前音色</span>
                   <div className="select-wrap">
-                    <select value={settings.selectedVoice} onChange={(event) => updateSettings("selectedVoice", event.target.value)} disabled={running || !settings.voiceCache.length}>
+                    <select value={settings.selectedVoice} onChange={(event) => updateSettings("selectedVoice", event.target.value)} disabled={busy || !settings.voiceCache.length}>
                       {selectedVoice && !filteredVoices.some((voice) => voice.shortName === selectedVoice.shortName) && (
                         <option value={selectedVoice.shortName}>{voiceLabel(selectedVoice)}</option>
                       )}
@@ -645,15 +794,15 @@ export function App() {
                   </div>
                 </label>
                 <div className="range-stack">
-                  <RangeField label="语速" value={settings.rate} min={-50} max={100} step={5} suffix="%" disabled={running} onChange={(value) => updateSettings("rate", value)} />
-                  <RangeField label="音调" value={settings.pitch} min={-50} max={50} step={5} suffix="Hz" disabled={running} onChange={(value) => updateSettings("pitch", value)} />
+                  <RangeField label="语速" value={settings.rate} min={-50} max={100} step={5} suffix="%" disabled={busy} onChange={(value) => updateSettings("rate", value)} />
+                  <RangeField label="音调" value={settings.pitch} min={-50} max={50} step={5} suffix="Hz" disabled={busy} onChange={(value) => updateSettings("pitch", value)} />
                 </div>
                 <div className="preview-control">
                   <label className="field grow">
                     <span>试听文本</span>
-                    <input value={settings.previewText} onChange={(event) => updateSettings("previewText", event.target.value)} disabled={running} />
+                    <input value={settings.previewText} onChange={(event) => updateSettings("previewText", event.target.value)} disabled={busy} />
                   </label>
-                  <button className={`square-button field-button ${previewing ? "stop" : ""}`} onClick={() => previewing ? stopPreview() : void previewVoice()} disabled={running} title={previewing ? "停止试听" : "试听当前音色"}>
+                  <button className={`square-button field-button ${previewing ? "stop" : ""}`} onClick={() => previewing ? stopPreview() : void previewVoice()} disabled={busy} title={previewing ? "停止试听" : "试听当前音色"}>
                     {previewing ? <Square size={14} fill="currentColor" /> : <Headphones size={16} />}
                   </button>
                 </div>
@@ -662,7 +811,7 @@ export function App() {
 
               <section className="settings-section">
                 <SectionHeading icon={<FolderOpen />} title="输出" subtitle="直接写入授权目录" />
-                <button className={`directory-control ${directory ? "selected" : ""}`} onClick={() => void chooseDirectory()} disabled={running}>
+                <button className={`directory-control ${directory ? "selected" : ""}`} onClick={() => void chooseDirectory()} disabled={busy}>
                   <FolderOpen size={18} />
                   <span><strong>{directory?.name ?? "选择输出目录"}</strong><small>{directory ? (directoryAuthorized ? "已授权读写" : "生成时需要重新授权") : "不会保存文案或中间文件"}</small></span>
                   <em>{directory ? "更换" : "选择"}</em>
@@ -670,11 +819,11 @@ export function App() {
                 <div className="number-grid">
                   <label className="field">
                     <span>最大分段时长</span>
-                    <div className="number-suffix"><input type="number" min="1" step="1" value={settings.maxSegmentSeconds} onChange={(event) => updateSettings("maxSegmentSeconds", Number(event.target.value))} disabled={running} /><span>秒</span></div>
+                    <div className="number-suffix"><input type="number" min="1" step="1" value={settings.maxSegmentSeconds} onChange={(event) => updateSettings("maxSegmentSeconds", Number(event.target.value))} disabled={busy} /><span>秒</span></div>
                   </label>
                   <label className="field">
                     <span>起始序号</span>
-                    <input type="number" min="1" step="1" value={settings.startSequence} onChange={(event) => updateSettings("startSequence", Number(event.target.value))} disabled={running} />
+                    <input type="number" min="1" step="1" value={settings.startSequence} onChange={(event) => updateSettings("startSequence", Number(event.target.value))} disabled={busy} />
                   </label>
                 </div>
               </section>
@@ -695,7 +844,7 @@ export function App() {
 
       <footer className="workspace-statusbar">
         <div className="status-primary">
-          <i className={`status-indicator ${running ? "running" : failedCount ? "failed" : ""}`} />
+          <i className={`status-indicator ${busy ? "running" : failedCount ? "failed" : ""}`} />
           <strong>{workStatus}</strong>
           <span>{activeRow?.detail ?? `${validCount} 个有效 · ${completedCount} 个完成${failedCount ? ` · ${failedCount} 个失败` : ""}`}</span>
         </div>
@@ -706,7 +855,7 @@ export function App() {
               <pre>{logs.join("\n")}</pre>
             </details>
           )}
-          {failedCount > 0 && !running && <button onClick={() => void runBatch("failed")}><RotateCcw size={14} /> 重试失败项</button>}
+          {failedCount > 0 && !busy && <button onClick={() => void runBatch("failed")}><RotateCcw size={14} /> 重试失败项</button>}
           {running && !paused && <button onClick={pauseBatch} disabled={cancelling}><Pause size={14} /> 暂停</button>}
           {running && paused && <button onClick={resumeBatch} disabled={cancelling}><CirclePlay size={14} /> 继续</button>}
           {running && <button className="danger" onClick={cancelBatch} disabled={cancelling}><Square size={12} fill="currentColor" /> {cancelling ? "取消中" : "取消"}</button>}
@@ -755,6 +904,7 @@ function RangeField({ label, value, min, max, step, suffix, disabled, onChange }
 function createBlankRow(): ProjectRow {
   return {
     id: crypto.randomUUID(),
+    rawText: "",
     text: "",
     name: "",
     status: "idle",

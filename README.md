@@ -1,12 +1,31 @@
 # 自动音频字幕
 
+[下载安装包](https://github.com/jmdx-code/auto-audio-subtitles/releases/latest) · [构建与发布](https://github.com/jmdx-code/auto-audio-subtitles/actions)
+
 一个仅面向最新版 Microsoft Edge 的 Manifest V3 扩展。它在浏览器前台工作台中调用 Edge TTS 生成音频，使用本地打包的 FFmpeg/WASM 裁剪静音、按最大时长拆分 MP3，并输出覆盖完整时间轴的 SRT。
+
+## 缅文批量整理 → 音频字幕
+
+1. 在扩展工作台的 **A 列（原始缅文）** 粘贴原始文案，每个表格行为一个项目。
+2. 点击“打开 AI Studio / 登录”，或使用浏览器中已打开的 AI Studio 对话页面。完成 Google 登录后回工作台点击“刷新标签页”，在“AI Studio 标签页”下拉框中选择目标页面，再点击“连接 / 刷新模型”。存在多个页面时必须明确选择；列表包含其他浏览器窗口里的对话页，不包含 App 编辑页。
+3. 选择从 AI Studio 网页读取的免费文本模型，点击“整理全部”或选中项目后点击“整理所选”。对应项目的 **B 列** 会被整理结果替换；原始 A 列保留。每行约 20–70 字符，按标点和语义断行，去空行、末尾标签和表情，不翻译或改写正文。
+4. 检查或手动修改 B 列，填写 **C 列项目名称**，选择音色与输出目录，点击“生成音频”。音频与 SRT 继续使用 B 列的每个有效文本行。
+
+已断行的文案可以直接粘贴到 B 列，继续使用原有音频流程。
+
+无需 Gemini API Key、后端服务或付费 API；通过页面自动化填写提示词并读取 AI Studio 回复。每条文案提交前，在所选标签页中新建会话并开启 AI Studio 的 Temporary chat，确认旧对话为空后才发送完整整理规则和本条原文。不同文案不共用上下文，临时会话不会自动保存到 AI Studio 历史。若无法清空旧会话或开启临时模式，停止任务，不沿用旧会话。已有保存的历史记录不会被删除。
+
+模型列表排除网页标记为 Paid 的模型，每次运行前再次检查收费标记。免费可用性和限额以登录账号及 AI Studio 网页为准。仅迁移文案整理，不包含参考 App 的 SRT 整理等其他功能。
+
+AI 整理串行运行，默认请求间隔 5 秒、回复超时 180 秒，可在设置中调整。停止整理会等待当前回复结束，并保留此前结果；遇到限流、失联、超时或无效回复会停止批次，不覆盖该项已有结果。修复问题后可选中未完成项目再整理。AI Studio 标签页与工作台都应保持打开，运行时不要手动操作该专用 AI Studio 会话。AI Studio 网页结构变化可能需要更新适配器。文案会发送到 Google AI Studio；请检查 AI 输出后再生成音频。
+
+每个批次固定使用启动时选定的标签页 ID，切换浏览器当前标签页不会影响结果归属。切换目标 AI Studio 页面后需重新连接模型；所选页面关闭或离开对话页面时停止，不会自动改用另一个页面。工作台刷新后会记住本次会话选定的标签页，但文案依然不会缓存。同一 AI Studio 页正在执行请求时会拒绝第二个并发请求。不同页面各自处理请求，不广播文案或读取其他页面的回复。
 
 ## 当前功能
 
 - 从 Google 表格复制单列数据，正确保留“表格行”和“单元格内部换行”。
 - 表格每行是一个项目；文案单元格中的每个有效文本行是一条音频片段和 SRT 字幕。
-- 项目工作区使用 Univer 电子表格：固定 A-D 四列，仅文案和项目名称可编辑；支持区域选择、单列粘贴、行高调整和多行单元格编辑，`Tab` 在可编辑单元格间导航。
+- 项目工作区使用 Univer 电子表格：固定 A-E 五列（原文、整理后文案、项目名称、片段、状态），前三列可编辑；支持区域选择、单列粘贴、行高调整和多行单元格编辑，`Tab` 在可编辑单元格间导航。
 - 工作表默认创建 20 行；添加项目或粘贴更多内容时会自动扩展，不会截断超出默认行数的文案。
 - 工作台采用全高数据表格、紧凑工具栏、按需展开的设置侧栏和不遮挡内容的底部状态栏。
 - 全局选择 Edge 音色、语速、音调，并使用相同参数在线试听。
@@ -37,7 +56,7 @@
 
 ## 本地开发
 
-要求：Node.js 20 或更高版本、最新版稳定版 Microsoft Edge。
+要求：Node.js 24 LTS、最新版稳定版 Microsoft Edge。
 
 ```bash
 npm ci
@@ -51,25 +70,25 @@ npm run build
 npm run dev
 ```
 
-生产依赖由 Vite 打包进 `dist/`，FFmpeg WASM、字体和许可证文件也随发布包提供。最终用户不需要安装 Node.js、执行 `npm install` 或在首次运行时下载代码依赖；只有在线语音合成本身需要连接 Microsoft 服务。
+生产依赖由 Vite 打包进 `dist/`，FFmpeg WASM、字体和许可证文件也随发布包提供。最终用户不需要安装 Node.js、执行 `npm install` 或在首次运行时下载代码依赖；音频合成需要连接 Microsoft 服务；可选的 AI 文案整理需要连接 Google AI Studio。
 
 ## 在 Edge 中安装测试
 
-1. 执行 `npm run build`。
+1. 下载 [最新 Release 的扩展 ZIP](https://github.com/jmdx-code/auto-audio-subtitles/releases/latest) 并解压；开发者也可以执行 `npm run build`。
 2. 在 Edge 地址栏打开 `edge://extensions`。
 3. 开启“开发人员模式”。
-4. 点击“加载解压缩的扩展”，选择本项目的 `dist/` 目录。
+4. 点击“加载解压缩的扩展”，选择解压后含 `manifest.json` 的目录，或本项目的 `dist/` 目录。
 5. 点击工具栏中的“自动音频字幕”图标；重复点击会聚焦已打开的工作台。
 
 当前版本通过 GitHub Release ZIP 或本地解压方式分发，暂不发布到 Edge Add-ons 商店。开发版本更新后需要在扩展管理页点击“重新加载”。
 
 ## 权限说明
 
-- `storage`：保存音色、语速、音调、最大分段时间、起始序号和试听文本；不保存文案。
+- `storage`：保存音色、语速、音调、最大分段时间、起始序号、试听文本、AI 模型、请求间隔与超时；不保存文案。
 - `tabs`：点击扩展图标时聚焦已经打开的工作台，避免重复创建页面。
 - `https://speech.platform.bing.com/*`：获取 Edge 音色并进行在线语音合成。
 - 输出目录访问不是 Manifest 权限；只有用户主动选择目录并授权后才能写入。
-- 不申请无关域名权限，也不注入任何网页脚本。
+- `scripting` 和 `https://aistudio.google.com/*`：只在 AI Studio 网页加载本地自动化适配器，读取模型列表、填写提示词并读取回复。
 
 ## 已知限制
 
@@ -83,14 +102,15 @@ npm run dev
 
 `.github/workflows/release.yml` 遵循指定的浏览器扩展安全发布规范：
 
-- 只由 `v*` 标签推送触发。
-- 在 Node.js 20 环境执行 `npm ci`、测试和构建。
+- 只由 `v*` 标签推送触发，校验标签、package、lockfile 和 Manifest 版本一致。
+- 在 Node.js 24 环境执行 `npm ci`、测试和构建。
+- 生成 `SHA256SUMS.txt` 校验和并附到 Release。
 - 从 `dist/` 内部压缩，保证 ZIP 解压后根目录直接包含 `manifest.json`。
 - 发布包同时包含项目许可证、第三方组件说明和主要依赖许可证文本。
-- 使用 `actions/attest-build-provenance@v2` 为最终 ZIP 创建构建来源证明。
-- 使用默认 `GITHUB_TOKEN` 和 `softprops/action-gh-release@v2`，由 `github-actions[bot]` 上传 Release。
+- 使用 `actions/attest-build-provenance@v4` 为最终 ZIP 创建构建来源证明。
+- 使用默认 `GITHUB_TOKEN` 和 `softprops/action-gh-release@v3`，由 `github-actions[bot]` 上传 Release。
 
-本地测试完成后，再将仓库提交到 `secure-artifacts` 组织并执行安全扫描与审核流程。不要在仓库、Issue 或构建日志中提交 GitHub Token。
+仓库发布到 `jmdx-code/auto-audio-subtitles`，只通过版本标签触发自动发布。上传范围仅为本插件源码、测试、构建脚本及公开文档；本地依赖、构建目录、用户文案和审核临时数据不入库。
 
 ### 如何发布新版本
 
@@ -109,15 +129,15 @@ npm run dev
    ```bash
    git status
    git add -A
-   git commit -m "release: v0.1.5"
+   git commit -m "release: v0.2.0"
    git push origin main
    ```
 
 3. 创建并推送与版本号一致的附注标签：
 
    ```bash
-   git tag -a v0.1.5 -m "v0.1.5"
-   git push origin v0.1.5
+   git tag -a v0.2.0 -m "v0.2.0"
+   git push origin v0.2.0
    ```
 
 4. 在仓库的 **Actions** 页面确认 `Release Browser Extension` 成功，再到 **Releases** 页面确认 ZIP 和 Attestation 均已生成。
@@ -130,14 +150,7 @@ npm run dev
 | 向后兼容的新功能 | 次版本 | `1.0.0` → `1.1.0` |
 | 向后兼容的修复 | 修订版本 | `1.0.0` → `1.0.1` |
 
-如果标签触发的 workflow 失败，先修复代码并推送新的提交，然后删除失败标签并在修复后的提交上重新创建：
-
-```bash
-git tag -d v0.1.5
-git push origin :refs/tags/v0.1.5
-git tag -a v0.1.5 -m "v0.1.5"
-git push origin v0.1.5
-```
+如果 workflow 失败，先在 Actions 查看失败步骤，修复后提交并重试失败任务。若需修改已推送标签对应的源码，使用递增的新版本号发布，避免覆盖已发布安装包。发布说明可以保存为 `docs/releases/vX.Y.Z.md`，workflow 会自动读入。
 
 ## 开源许可
 

@@ -57,7 +57,7 @@ button:disabled, input:disabled, textarea:disabled, select:disabled { cursor: no
 
 .workspace-content { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; padding: 10px; }
 .workspace-shell.settings-open .workspace-content { grid-template-columns: minmax(0, 1fr) 360px; gap: 10px; }
-.grid-workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: 48px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; }
+.grid-workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: 48px auto minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 9px; background: #fff; }
 .grid-commandbar { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 11px 0 14px; border-bottom: 1px solid var(--line); }
 .grid-title { min-width: 0; display: flex; align-items: center; gap: 9px; }
 .grid-title > svg { color: var(--accent); }
@@ -199,3 +199,9 @@ input:focus, textarea:focus, select:focus { border-color: #8088df; box-shadow: 0
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.organizer-commandbar { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: #fafaff; }
+.organizer-label { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 11px; font-weight: 700; margin-right: 4px; }
+.organizer-commandbar select { width: 220px; height: 32px; font-size: 11px; }
+.organizer-commandbar button { height: 32px; padding: 0 10px; }
+.organizer-hint { color: var(--muted); font-size: 10px; }

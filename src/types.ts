@@ -6,6 +6,9 @@ export type VoiceInfo = {
 };
 
 export type AppSettings = {
+  studioModelId: string;
+  studioIntervalSeconds: number;
+  studioTimeoutSeconds: number;
   selectedVoice: string;
   rate: number;
   pitch: number;
@@ -26,6 +29,8 @@ export type ProjectStatus =
 
 export type ProjectRow = {
   id: string;
+  rawText?: string;
+  organizeDetail?: string;
   text: string;
   name: string;
   status: ProjectStatus;

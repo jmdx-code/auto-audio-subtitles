@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,15 +15,18 @@ jobs:
       id-token: write
       contents: write
       attestations: write
+      artifact-metadata: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
@@ -32,21 +38,41 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Verify extension layout
-        run: test -f dist/manifest.json && test -f dist/vendor/ffmpeg-core.wasm && test -f dist/LICENSE && test -f dist/THIRD_PARTY_NOTICES.md && test -f dist/licenses/FFMPEG-GPL-2.0-OR-LATER.txt && test -f dist/licenses/EDGE-TTS-UNIVERSAL-AGPL-3.0.txt
+      - name: Verify version and extension layout
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/verify-release.mjs "$RELEASE_TAG"
 
       - name: Package extension
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           cd dist
-          zip -r ../auto-audio-subtitles-${{ github.ref_name }}.zip .
+          zip -r "../auto-audio-subtitles-${RELEASE_TAG}.zip" .
+          cd ..
+          sha256sum "auto-audio-subtitles-${RELEASE_TAG}.zip" > SHA256SUMS.txt
+
+      - name: Prepare release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [ -f "docs/releases/${RELEASE_TAG}.md" ]; then
+            cp "docs/releases/${RELEASE_TAG}.md" RELEASE_NOTES.md
+          else
+            printf '%s\n' "自动音频字幕 ${RELEASE_TAG}" > RELEASE_NOTES.md
+          fi
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: "*.zip"
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          files: "*.zip"
+          files: |
+            *.zip
+            SHA256SUMS.txt
+          fail_on_unmatched_files: true
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
