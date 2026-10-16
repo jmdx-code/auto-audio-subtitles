@@ -40,6 +40,7 @@ export type ProjectRow = {
 };
 
 export type SynthesisOptions = {
+  signal?: AbortSignal;
   voice: string;
   rate: string;
   pitch: string;

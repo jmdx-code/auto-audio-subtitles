@@ -20,8 +20,9 @@ if (tag !== undefined) {
 const files = [source.action.default_popup, "workbench.html", ...Object.values(source.icons),
   ...source.content_scripts.flatMap((script) => script.js), "vendor/ffmpeg-core.js", "vendor/ffmpeg-core.wasm",
   "LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/FFMPEG-GPL-2.0-OR-LATER.txt",
-  "licenses/EDGE-TTS-UNIVERSAL-AGPL-3.0.txt"];
+  "licenses/EDGE-TTS-LGPL-3.0.txt"];
 for (const file of files) assert(existsSync(resolve("dist", file)), `Missing packaged file: ${file}`);
+assert(!existsSync(resolve("dist/licenses/EDGE-TTS-UNIVERSAL-AGPL-3.0.txt")), "Obsolete speech library license remains");
 for (const script of source.content_scripts.flatMap((entry) => entry.js)) {
   new vm.Script(readFileSync(resolve("dist", script), "utf8"));
 }

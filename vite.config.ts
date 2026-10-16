@@ -30,7 +30,7 @@ function copyReleaseDocuments(): Plugin {
     ["node_modules/@univerjs/presets/LICENSE", "licenses/UNIVER-PRESETS-APACHE-2.0.txt"],
     ["node_modules/@fontsource/noto-sans-myanmar/LICENSE", "licenses/NOTO-SANS-MYANMAR-OFL-1.1.txt"],
     ["node_modules/@webextkits/storage-local/LICENSE", "licenses/WEBEXTKITS-STORAGE-MIT.txt"],
-    ["node_modules/edge-tts-universal/LICENSE", "licenses/EDGE-TTS-UNIVERSAL-AGPL-3.0.txt"],
+    ["licenses/EDGE-TTS-LGPL-3.0.txt", "licenses/EDGE-TTS-LGPL-3.0.txt"],
     ["node_modules/lucide-react/LICENSE", "licenses/LUCIDE-ISC.txt"],
     ["node_modules/react/LICENSE", "licenses/REACT-MIT.txt"],
     ["node_modules/react-dom/LICENSE", "licenses/REACT-DOM-MIT.txt"],
@@ -49,6 +49,8 @@ function copyReleaseDocuments(): Plugin {
 }
 
 export default defineConfig({
+  // Preserve the relative module-worker URL when testing audio through Vite.
+  optimizeDeps: { exclude: ["@ffmpeg/ffmpeg"] },
   plugins: [
     react(),
     copyFfmpegCore(),

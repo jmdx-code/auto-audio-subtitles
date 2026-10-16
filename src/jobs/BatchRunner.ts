@@ -101,6 +101,9 @@ export class BatchRunner {
         });
         const audioBlob = await this.synthesizeWithRetry(line, job, index, lines.length);
         await this.controller.checkpoint();
+        this.events.updateRow(job.rowId, {
+          detail: `正在裁剪片段 ${index + 1}/${lines.length} 的静音`,
+        });
         const wav = await this.audio.trimToWav(
           new Uint8Array(await audioBlob.arrayBuffer()),
           `${job.rowId}-${index}`,
@@ -173,11 +176,13 @@ export class BatchRunner {
       await this.controller.checkpoint();
       try {
         return await this.provider.synthesize(text, {
+          signal: this.controller.signal,
           voice: this.settings.selectedVoice,
           rate: formatRate(this.settings.rate),
           pitch: formatPitch(this.settings.pitch),
         });
       } catch (error) {
+        if (this.controller.isCancelled) throw new TaskCancelledError();
         lastError = error;
         if (attempt === 3) break;
         this.events.updateRow(job.rowId, {

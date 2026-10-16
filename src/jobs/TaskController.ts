@@ -6,6 +6,11 @@ export class TaskCancelledError extends Error {
 }
 
 export class TaskController {
+  private readonly abortController = new AbortController();
+
+  get signal(): AbortSignal {
+    return this.abortController.signal;
+  }
   private paused = false;
   private cancelled = false;
   private resumeResolvers: Array<() => void> = [];
@@ -29,6 +34,7 @@ export class TaskController {
 
   cancel(): void {
     this.cancelled = true;
+    this.abortController.abort();
     this.resume();
   }
 

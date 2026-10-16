@@ -97,6 +97,7 @@ export function App() {
   const controllerRef = useRef<TaskController | null>(null);
   const audioRef = useRef<AudioEngine | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewControllerRef = useRef<AbortController | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const spreadsheetRef = useRef<ProjectSpreadsheetHandle | null>(null);
 
@@ -120,6 +121,7 @@ export function App() {
     return () => {
       active = false;
       stopPreview();
+      controllerRef.current?.cancel();
       audioRef.current?.terminate();
     };
     // Initialization intentionally runs once.
@@ -314,13 +316,17 @@ export function App() {
       return;
     }
     stopPreview();
+    const controller = new AbortController();
+    previewControllerRef.current = controller;
     setPreviewing(true);
     try {
       const blob = await edgeProvider.synthesize(text, {
+        signal: controller.signal,
         voice: settings.selectedVoice,
         rate: formatRate(settings.rate),
         pitch: formatPitch(settings.pitch),
       });
+      if (controller.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       previewUrlRef.current = url;
@@ -329,12 +335,15 @@ export function App() {
       audio.onerror = stopPreview;
       await audio.play();
     } catch (error) {
+      if (controller.signal.aborted) return;
       stopPreview();
       showToast("error", `试听失败：${errorMessage(error)}`);
     }
   }
 
   function stopPreview(): void {
+    previewControllerRef.current?.abort();
+    previewControllerRef.current = null;
     previewAudioRef.current?.pause();
     previewAudioRef.current = null;
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);

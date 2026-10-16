@@ -1,10 +1,13 @@
-import { readFileSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 
 const assetsDirectory = resolve("dist/assets");
 const manifest = JSON.parse(readFileSync(resolve("dist/manifest.json"), "utf8"));
 const workbenchHtml = readFileSync(resolve("dist/workbench.html"), "utf8");
 const workbenchScript = readFileSync(resolve(assetsDirectory, "workbench.js"), "utf8");
+
+const obsoleteTtsLicense = resolve("dist/licenses/EDGE-TTS-UNIVERSAL-AGPL-3.0.txt");
+if (existsSync(obsoleteTtsLicense)) unlinkSync(obsoleteTtsLicense);
 
 for (const file of readdirSync(assetsDirectory)) {
   const isOldAppChunk = /^App-.*\.js$/.test(file) && !workbenchScript.includes(file);
